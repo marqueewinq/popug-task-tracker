@@ -156,4 +156,4 @@ Invoice: invoice_id, account_from, amount, created_at
 
 [Miro Link](https://miro.com/app/board/uXjVPTrIHgk=/?share_link_id=879380577449)
 
-<img src="./img/0.pngs">
+<img src="./img/0.png">
