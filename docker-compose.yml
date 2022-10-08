@@ -1,0 +1,34 @@
+version: '3.4'
+
+x-environment:
+  &shared-envvar
+  MONGO_INITDB_ROOT_USERNAME: admin
+  MONGO_INITDB_ROOT_PASSWORD: pass
+
+services:
+  auth:
+    image: popug_auth
+    build: ./auth
+    environment:
+      DB_HOST: "db"
+      DB_PORT: "27017"
+      DB_DATABASE: "auth"
+      VERSION: "${AUTH_VERSION:-local}"
+      AUTH_AUTHSECRET: "${AUTH_AUTH_AUTHSECRET:-auth_secret}"
+      << : *shared-envvar
+    ports:
+      - "80:80"
+    volumes:
+      - ./auth/auth:/code/auth
+    depends_on:
+      - db
+    command: ["uvicorn", "auth.app:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
+
+  db:
+    image: mongo:latest
+    logging:
+      driver: none
+    environment:
+      << : *shared-envvar
+    ports:
+      - "27099:27017"

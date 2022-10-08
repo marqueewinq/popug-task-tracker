@@ -1,0 +1,20 @@
+#!/bin/bash
+set -euxo pipefail
+
+curl localhost/user/users/abcde | jq
+
+curl localhost/user/users/ -H "Content-Type: application/json" \
+    -d '{"user_id": 123, "secret": "correct", "role": "admin"}' | jq
+
+curl localhost/user/authN -H "Content-Type: application/json" \
+    -d '{"user_id": 123, "secret": "incorrect"}' | jq
+
+curl localhost/user/authN -H "Content-Type: application/json" \
+    -d '{"user_id": 123, "secret": "correct"}' | jq
+
+TOKEN=$(curl localhost/user/authN -H "Content-Type: application/json" \
+    -d '{"user_id": 123, "secret": "correct"}' | jq .token -r)
+
+curl -XPOST localhost/user/authZ -H "Content-Type: application/json" -H "Authorization: ${TOKEN}" | jq
+
+curl -XPOST localhost/user/authZ -H "Content-Type: application/json" -H "Authorization: incorrect" | jq
