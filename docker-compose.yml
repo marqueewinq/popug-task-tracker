@@ -1,21 +1,28 @@
 version: '3.4'
 
 x-environment:
-  &shared-envvar
+  &shared-envvar-db
   DB_HOST: "db"
   DB_PORT: "27017"
   MONGO_INITDB_ROOT_USERNAME: admin
   MONGO_INITDB_ROOT_PASSWORD: pass
 
+x-environment2:
+  &shared-envvar-kafka
+  KAFKA_SERVER: kafka
+  KAFKA_PORT: "29092"
+
 services:
   auth:
     image: popug_auth
     build: ./auth
+    restart: always
     environment:
       DB_DATABASE: "auth"
       VERSION: "${AUTH_VERSION:-auth-0.0.1}"
       AUTH_AUTHSECRET: "${AUTH_AUTH_AUTHSECRET:-auth_secret}"
-      << : *shared-envvar
+      << : *shared-envvar-db
+      << : *shared-envvar-kafka
     ports:
       - "80:80"
     volumes:
@@ -23,17 +30,20 @@ services:
       - ./auth/auth:/code/auth
     depends_on:
       - db
+      - kafka
+      - zookeeper
     command: ["uvicorn", "auth.app:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
     networks:
       - auth
       - internal
+      - kafka
 
   db:
     image: mongo:latest
     logging:
       driver: none
     environment:
-      << : *shared-envvar
+      << : *shared-envvar-db
     ports:
       - "27099:27017"
     networks:
@@ -47,7 +57,7 @@ services:
       DB_DATABASE: "tasktracker"
       AUTH_URL: "http://auth/"
       VERSION: "${TASKTRACKER_VERSION:-tasktracker-0.0.1}"
-      << : *shared-envvar
+      << : *shared-envvar-db
     ports:
       - "81:80"
     volumes:
@@ -60,10 +70,87 @@ services:
       - internal
       - tasktracker
 
+  tasktracker-listener:
+    image: popug_tasktracker
+    build: ./tasktracker
+    restart: always
+    environment:
+      DB_DATABASE: "tasktracker"
+      VERSION: "${TASKTRACKER_VERSION:-tasktracker-0.0.1}"
+      << : *shared-envvar-db
+      << : *shared-envvar-kafka
+    command: ["python", "-m", "tasktracker.consumer.app"]
+    depends_on:
+      - kafka
+      - zookeeper
+    volumes:
+      - ./common:/code/common # in practice, i would've `pip install popug-common` in Dockerfile
+      - ./tasktracker/tasktracker:/code/tasktracker
+    networks:
+      - kafka
+      - tasktracker
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:6.2.0
+    container_name: zookeeper
+    logging:
+      driver: none
+    networks:
+      - kafka
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:6.2.0
+    container_name: kafka
+    logging:
+      driver: none
+    networks:
+      - kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ADVERTISED_HOST_NAME: kafka:9092
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      # KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      # KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop:3.27.0
+    logging:
+      driver: none
+    networks:
+      - kafka
+    depends_on:
+      - kafka
+      - zookeeper
+    ports:
+      - 19000:9000
+    environment:
+      KAFKA_BROKERCONNECT: kafka:29092
+
+
 networks:
   auth:
     driver: bridge
   internal:
     driver: bridge
   tasktracker:
+    driver: bridge
+  kafka:
     driver: bridge

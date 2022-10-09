@@ -1,8 +1,12 @@
 import datetime as dt
 import os
+import logging
 import typing as ty
+import json
+from time import sleep
 
 import fastapi as fa
+import kafka
 import jwt
 from common.proto.auth import AuthNPayload, AuthNRequest, AuthNResponse
 from fastapi.encoders import jsonable_encoder as to_json
@@ -19,6 +23,9 @@ DB_PASS = os.environ["MONGO_INITDB_ROOT_PASSWORD"]
 DB_NAME = os.environ["DB_DATABASE"]
 AUTHSECRET = os.environ["AUTH_AUTHSECRET"]
 
+KAFKA_PORT = os.environ["KAFKA_PORT"]
+KAFKA_SERVER = os.environ["KAFKA_SERVER"]
+
 VERSION = os.environ.get("VERSION")
 EXPIRESSECONDS = int(os.environ.get("AUTH_EXPIRESSECONDS", str(30 * 60)))
 
@@ -31,10 +38,22 @@ def startup() -> ty.Any:
     app.client = MongoClient(url)
     app.db = app.client[DB_NAME]
 
+    for delay in range(10):
+        try:
+            app.kafka_producer = kafka.KafkaProducer(
+                bootstrap_servers=f"{KAFKA_SERVER}:{KAFKA_PORT}",
+                value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+            )
+        except kafka.errors.NoBrokersAvailable:
+            logging.info(f"No brokers available, retrying in {delay} seconds")
+            sleep(delay)
+    assert hasattr(app, "kafka_producer"), "Couldn't connect to Kafka"
+
 
 @app.on_event("shutdown")
 def shutdown_db_client() -> None:
     app.client.close()
+    del app.kafka_producer
 
 
 @app.get("/")
@@ -65,6 +84,10 @@ async def read_user(request: fa.Request, user_id: str) -> JSONResponse:
 async def create_user(request: fa.Request, user: User) -> JSONResponse:
     user = ty.cast(User, hexify_secret(user))
     request.app.db[User.__name__].insert_one(to_json(user))
+
+    user.secret = "***"
+    app.kafka_producer.send("User.Created", to_json(user)).get(timeout=1)
+
     return JSONResponse(content=to_json(user), status_code=fa.status.HTTP_201_CREATED)
 
 

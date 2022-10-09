@@ -114,9 +114,12 @@ async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
 
 
 async def shuffle_issues(request: fa.Request, user_id_list: ty.List[str]):
-    for issue in request.app.db[Issue.__name__].find({}):
+    for issue_document in request.app.db[Issue.__name__].find(
+        {"status": IssueStatus.todo.value}
+    ):
+        assignee_id = random.choice(user_id_list)
         request.app.db[Issue.__name__].update_one(
-            {"uuid": issue.uuid}, {"assignee_id": random.choice(user_id_list)}
+            {"_id": issue_document["_id"]}, {"$set": {"assignee_id": assignee_id}}
         )
 
 
@@ -138,13 +141,16 @@ async def issues_shuffle(request: fa.Request) -> JSONResponse:
             status_code=fa.status.HTTP_403_FORBIDDEN,
         )
 
-    user_id_list = [user.user_id for user in request.app.db[User.__name__].find({})]
+    user_id_list = [
+        user_document["user_id"]
+        for user_document in request.app.db[User.__name__].find({})
+    ]
     if len(user_id_list) == 0:
         return JSONResponse(
             content={"error": "No users found"}, status_code=fa.status.HTTP_409_CONFLICT
         )
 
-    shuffle_issues(request, user_id_list)
+    await shuffle_issues(request, user_id_list)  # async or no?
     return JSONResponse(content={}, status_code=fa.status.HTTP_200_OK)
 
 
