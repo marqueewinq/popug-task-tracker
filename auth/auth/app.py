@@ -1,19 +1,16 @@
+import datetime as dt
 import os
 import typing as ty
-import datetime as dt
-import jwt
 
 import fastapi as fa
+import jwt
+from common.proto.auth import AuthNPayload, AuthNRequest, AuthNResponse
 from fastapi.encoders import jsonable_encoder as to_json
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 
 from auth.models import User
-from auth.serializers import AuthNRequest, AuthNPayload, AuthNResponse
 from auth.utils import hexify_secret
-
-app = fa.FastAPI()
-
 
 DB_HOST = os.environ["DB_HOST"]
 DB_PORT = os.environ["DB_PORT"]
@@ -24,6 +21,8 @@ AUTHSECRET = os.environ["AUTH_AUTHSECRET"]
 
 VERSION = os.environ.get("VERSION")
 EXPIRESSECONDS = int(os.environ.get("AUTH_EXPIRESSECONDS", str(30 * 60)))
+
+app = fa.FastAPI(title=str(__package__), version=VERSION)
 
 
 @app.on_event("startup")
@@ -64,7 +63,7 @@ async def read_user(request: fa.Request, user_id: str) -> JSONResponse:
     response_model=User,
 )
 async def create_user(request: fa.Request, user: User) -> JSONResponse:
-    user = hexify_secret(user)
+    user = ty.cast(User, hexify_secret(user))
     request.app.db[User.__name__].insert_one(to_json(user))
     return JSONResponse(content=to_json(user), status_code=fa.status.HTTP_201_CREATED)
 
@@ -107,15 +106,26 @@ async def authn(request: fa.Request, authn_request: AuthNRequest) -> JSONRespons
     response_model=AuthNPayload,
 )
 async def authz(request: fa.Request):
-    token = request.headers.get("Authorization").replace("Bearer ", "")
+    auth_header = request.headers.get("authorization")
+    if auth_header is None:
+        return JSONResponse(
+            content={"error": "Missing authorization header"},
+            status_code=fa.status.HTTP_401_UNAUTHORIZED,
+        )
+    token = auth_header.replace("Bearer ", "")
     try:
-        decoded = jwt.decode(token, AUTHSECRET, algorithms=["HS256"])
+        decoded = AuthNPayload(**jwt.decode(token, AUTHSECRET, algorithms=["HS256"]))
     except jwt.exceptions.DecodeError:  # type: ignore
         return JSONResponse(
             content={"error": "Couldn't decode token"},
             status_code=fa.status.HTTP_400_BAD_REQUEST,
         )
-    return JSONResponse(content=decoded, status_code=fa.status.HTTP_200_OK)
+    except AttributeError:
+        return JSONResponse(
+            content={"error": "Wrong payload type"},
+            status_code=fa.status.HTTP_400_BAD_REQUEST,
+        )
+    return JSONResponse(content=to_json(decoded), status_code=fa.status.HTTP_200_OK)
 
 
-app.include_router(user_router, tags=["SSO"], prefix="/user")
+app.include_router(user_router, tags=["Auth"], prefix="/user")

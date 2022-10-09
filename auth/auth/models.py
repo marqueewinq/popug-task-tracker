@@ -1,12 +1,7 @@
-import enum
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-
-
-class UserRole(enum.Enum):
-    regular = "regular"
-    admin = "admin"
+from common.proto.auth import UserRole
 
 
 class User(BaseModel):

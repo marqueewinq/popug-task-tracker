@@ -1,8 +1,12 @@
+import enum
 import datetime as dt
 
 from pydantic import BaseModel
 
-from auth.models import UserRole
+
+class UserRole(enum.Enum):
+    regular = "regular"
+    admin = "admin"
 
 
 class AuthNRequest(BaseModel):

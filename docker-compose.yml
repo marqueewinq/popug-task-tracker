@@ -2,6 +2,8 @@ version: '3.4'
 
 x-environment:
   &shared-envvar
+  DB_HOST: "db"
+  DB_PORT: "27017"
   MONGO_INITDB_ROOT_USERNAME: admin
   MONGO_INITDB_ROOT_PASSWORD: pass
 
@@ -10,19 +12,21 @@ services:
     image: popug_auth
     build: ./auth
     environment:
-      DB_HOST: "db"
-      DB_PORT: "27017"
       DB_DATABASE: "auth"
-      VERSION: "${AUTH_VERSION:-local}"
+      VERSION: "${AUTH_VERSION:-auth-0.0.1}"
       AUTH_AUTHSECRET: "${AUTH_AUTH_AUTHSECRET:-auth_secret}"
       << : *shared-envvar
     ports:
       - "80:80"
     volumes:
+      - ./common:/code/common # in practice, i would've `pip install popug-common` in Dockerfile
       - ./auth/auth:/code/auth
     depends_on:
       - db
     command: ["uvicorn", "auth.app:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
+    networks:
+      - auth
+      - internal
 
   db:
     image: mongo:latest
@@ -32,3 +36,34 @@ services:
       << : *shared-envvar
     ports:
       - "27099:27017"
+    networks:
+      - auth
+      - tasktracker # in practice, i would've split this DB in two independent ones
+
+  tasktracker:
+    image: popug_tasktracker
+    build: ./tasktracker
+    environment:
+      DB_DATABASE: "tasktracker"
+      AUTH_URL: "http://auth/"
+      VERSION: "${TASKTRACKER_VERSION:-tasktracker-0.0.1}"
+      << : *shared-envvar
+    ports:
+      - "81:80"
+    volumes:
+      - ./common:/code/common # in practice, i would've `pip install popug-common` in Dockerfile
+      - ./tasktracker/tasktracker:/code/tasktracker
+    depends_on:
+      - auth
+    command: ["uvicorn", "tasktracker.app:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
+    networks:
+      - internal
+      - tasktracker
+
+networks:
+  auth:
+    driver: bridge
+  internal:
+    driver: bridge
+  tasktracker:
+    driver: bridge
