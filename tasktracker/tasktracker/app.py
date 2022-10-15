@@ -5,6 +5,7 @@ from functools import wraps
 import fastapi as fa
 from common import topics
 from common.proto.auth import UserRole
+from common.proto.common import VersionContent, ErrorContent
 from common.connectors import create_kafka_producer
 from fastapi.encoders import jsonable_encoder as to_json
 from fastapi.responses import JSONResponse
@@ -49,9 +50,17 @@ def shutdown_db_client() -> None:
     app.client.close()
 
 
-@app.get("/")
+@app.get(
+    "/",
+    summary="Basic service metadata",
+    status_code=fa.status.HTTP_200_OK,
+    response_model=VersionContent,
+)
 async def root() -> dict:
-    return {"version": VERSION}
+    return JSONResponse(
+        content=to_json(VersionContent(version=VERSION)),
+        status_code=fa.status.HTTP_200_OK,
+    )
 
 
 issue_router = fa.APIRouter()
@@ -66,7 +75,8 @@ def auth_required(func: ty.Callable) -> ty.Callable:
             payload = verify_request(request)
         except AuthException as e:
             return JSONResponse(
-                content={"error": str(e)}, status_code=fa.status.HTTP_401_UNAUTHORIZED
+                content=to_json(ErrorContent(message=str(e))),
+                status_code=fa.status.HTTP_401_UNAUTHORIZED,
             )
         request.payload = payload
         return await func(*args, request=request, **kwargs)
@@ -98,13 +108,23 @@ async def issues_list(request: fa.Request) -> JSONResponse:
     response_description="Issue created",
     status_code=fa.status.HTTP_201_CREATED,
     response_model=Issue,
+    responses={
+        404: {
+            "model": ErrorContent,
+            "description": "User with public ID equal to the given `assignee_id` not found",
+        }
+    },
 )
 @auth_required
 async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
     user = request.app.db[User.__name__].find_one({"user_id": issue.assignee_id})
     if user is None:
         return JSONResponse(
-            {"error": f"User with user_id {issue.assignee_id} does not exist"},
+            to_json(
+                ErrorContent(
+                    message=f"User with user_id {issue.assignee_id} does not exist"
+                )
+            ),
             status_code=fa.status.HTTP_404_NOT_FOUND,
         )
 
@@ -113,7 +133,7 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
 
     request.app.kafka_producer.send(topics.TASK_CREATED, returned_data)
 
-    return JSONResponse(content=returned_data, status_code=fa.status.HTTP_200_OK)
+    return JSONResponse(content=returned_data, status_code=fa.status.HTTP_201_CREATED)
 
 
 @issue_router.put(
@@ -122,6 +142,7 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
     response_description="Updated status to 'done'",
     status_code=fa.status.HTTP_200_OK,
     response_model=Issue,
+    responses={404: {"model": ErrorContent, "description": "Issue not found"}},
 )
 @auth_required
 async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
@@ -131,7 +152,7 @@ async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
     )
     if update_report.matched_count == 0:
         return JSONResponse(
-            content={"error": f"Issue {issue_id} not found"},
+            content=to_json(ErrorContent(message=f"Issue {issue_id} not found")),
             status_code=fa.status.HTTP_404_NOT_FOUND,
         )
 
@@ -147,12 +168,16 @@ async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
     summary="Shuffle Issue between Users",
     response_description="Issues' assignees shuffled",
     status_code=fa.status.HTTP_200_OK,
+    responses={
+        403: {"model": ErrorContent, "description": "Only admins can shuffle"},
+        409: {"model": ErrorContent, "description": "No users were found in a service"},
+    },
 )
 @auth_required
 async def issues_shuffle(request: fa.Request) -> JSONResponse:
     if request.payload.role != UserRole.admin:
         return JSONResponse(
-            content={"error": "Only admins can shuffle"},
+            content=to_json(ErrorContent(message="Only admins can shuffle")),
             status_code=fa.status.HTTP_403_FORBIDDEN,
         )
 
@@ -162,7 +187,8 @@ async def issues_shuffle(request: fa.Request) -> JSONResponse:
     ]
     if len(user_id_list) == 0:
         return JSONResponse(
-            content={"error": "No users found"}, status_code=fa.status.HTTP_409_CONFLICT
+            content=to_json(ErrorContent(message="No users found")),
+            status_code=fa.status.HTTP_409_CONFLICT,
         )
 
     shuffle_issues(request, user_id_list)

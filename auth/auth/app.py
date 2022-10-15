@@ -8,6 +8,7 @@ import jwt
 from common import topics
 from common.connectors import create_kafka_producer
 from common.proto.auth import AuthPayload, AuthRequest, AuthResponse
+from common.proto.common import VersionContent, ErrorContent
 from fastapi.encoders import jsonable_encoder as to_json
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
@@ -47,9 +48,17 @@ def shutdown_db_client() -> None:
     del app.kafka_producer
 
 
-@app.get("/")
+@app.get(
+    "/",
+    summary="Basic service metadata",
+    status_code=fa.status.HTTP_200_OK,
+    response_model=VersionContent,
+)
 async def root() -> dict:
-    return {"version": VERSION}
+    return JSONResponse(
+        content=to_json(VersionContent(version=VERSION)),
+        status_code=fa.status.HTTP_200_OK,
+    )
 
 
 user_router = fa.APIRouter()
@@ -60,12 +69,14 @@ user_router = fa.APIRouter()
     summary="Read user by Public ID",
     status_code=fa.status.HTTP_200_OK,
     response_model=User,
+    responses={404: {"model": ErrorContent, "description": "User not found"}},
 )
 async def read_user(request: fa.Request, user_id: str) -> JSONResponse:
     user_document = request.app.db[User.__name__].find_one({"user_id": user_id})
     if user_document is None:
         return JSONResponse(
-            {"error": "User not found"}, status_code=fa.status.HTTP_404_NOT_FOUND
+            {"error": f"User {user_id} not found"},
+            status_code=fa.status.HTTP_404_NOT_FOUND,
         )
     user = User(**user_document)
     user.secret = "***"
@@ -79,6 +90,7 @@ async def read_user(request: fa.Request, user_id: str) -> JSONResponse:
     response_description="User created",
     status_code=fa.status.HTTP_201_CREATED,
     response_model=User,
+    responses={409: {"model": ErrorContent, "description": "User already exists"}},
 )
 async def create_user(request: fa.Request, user: User) -> JSONResponse:
     user = ty.cast(User, hexify_secret(user))
@@ -104,6 +116,7 @@ auth_router = fa.APIRouter()
     response_description="User authenticated",
     status_code=fa.status.HTTP_200_OK,
     response_model=AuthResponse,
+    responses={404: {"model": ErrorContent, "description": "User not found"}},
 )
 async def authn(request: fa.Request, auth_request: AuthRequest) -> JSONResponse:
     user_data = request.app.db[User.__name__].find_one(
@@ -135,6 +148,16 @@ async def authn(request: fa.Request, auth_request: AuthRequest) -> JSONResponse:
     response_description="Token authorized",
     status_code=fa.status.HTTP_200_OK,
     response_model=AuthPayload,
+    responses={
+        400: {
+            "model": ErrorContent,
+            "description": "Token can't be decoded or decoded payload does not match schema",
+        },
+        401: {
+            "model": ErrorContent,
+            "description": "Missing authorization header or token expired",
+        },
+    },
 )
 async def verify(request: fa.Request):
     auth_header = request.headers.get("authorization")
