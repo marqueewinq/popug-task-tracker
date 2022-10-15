@@ -9,17 +9,17 @@ class UserRole(enum.Enum):
     admin = "admin"
 
 
-class AuthNRequest(BaseModel):
+class AuthRequest(BaseModel):
     user_id: str
     secret: str
 
 
-class AuthNPayload(BaseModel):
+class AuthPayload(BaseModel):
     user_id: str
     role: UserRole
     expires_at: dt.datetime
 
 
-class AuthNResponse(BaseModel):
+class AuthResponse(BaseModel):
     token: str
     expires_at: dt.datetime

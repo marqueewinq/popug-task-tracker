@@ -5,6 +5,7 @@ import sys
 import typing as ty
 import logging
 
+from common import topics
 from fastapi.encoders import jsonable_encoder as to_json
 import kafka
 from pymongo import MongoClient
@@ -41,10 +42,11 @@ def start_consumer(topic_name, consumer_callback):
         value_deserializer=lambda x: json.loads(x.decode("utf-8")),
         enable_auto_commit=True,
     )
+    logging.info(f"Started listening on {topic_name}")
 
     for message in consumer:
-        logging.info(
-            "Recv: %s:%d:%d: key=%s value=%s"
+        logging.debug(
+            "Received: %s:%d:%d: key=%s value=%s"
             % (
                 message.topic,
                 message.partition,
@@ -56,7 +58,7 @@ def start_consumer(topic_name, consumer_callback):
         consumer_callback(message.value)
 
 
-consumer_config: ty.Dict[str, ty.Callable] = {"User.Created": replicate_user}
+consumer_config: ty.Dict[str, ty.Callable] = {topics.USER_CREATED: replicate_user}
 
 
 def main():
@@ -65,7 +67,6 @@ def main():
         max_workers=len(consumer_config)
     ) as executor:
         for topic_name, consumer_callback in consumer_config.items():
-            logging.info(f"Started listening on {topic_name}")
             executor.submit(start_consumer, topic_name, consumer_callback)
 
 

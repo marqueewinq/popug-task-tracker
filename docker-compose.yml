@@ -1,13 +1,13 @@
 version: '3.4'
 
-x-environment:
+x-environment-db:
   &shared-envvar-db
   DB_HOST: "db"
   DB_PORT: "27017"
   MONGO_INITDB_ROOT_USERNAME: admin
   MONGO_INITDB_ROOT_PASSWORD: pass
 
-x-environment2:
+x-environment-kafka:
   &shared-envvar-kafka
   KAFKA_SERVER: kafka
   KAFKA_PORT: "29092"

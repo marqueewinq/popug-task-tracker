@@ -1,6 +1,6 @@
 import os
 import typing as ty
-import random
+from functools import wraps
 
 import fastapi as fa
 from common.proto.auth import UserRole
@@ -8,8 +8,9 @@ from fastapi.encoders import jsonable_encoder as to_json
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 
-from tasktracker.auth import AuthZException, verify_request
-from tasktracker.models import Issue, User, IssueStatus
+from tasktracker.auth import AuthException, verify_request
+from tasktracker.models import Issue, IssueStatus, User
+from tasktracker.utils import shuffle_issues
 
 DB_HOST = os.environ["DB_HOST"]
 DB_PORT = os.environ["DB_PORT"]
@@ -20,7 +21,11 @@ AUTH_URL = os.environ["AUTH_URL"]
 
 VERSION = os.getenv("VERSION")
 
-app = fa.FastAPI(title=str(__package__), version=VERSION)
+app = fa.FastAPI(
+    title=str(__package__),
+    version=VERSION,
+    # TODO: add auth method to docs
+)
 
 
 @app.on_event("startup")
@@ -45,23 +50,36 @@ async def root() -> dict:
 issue_router = fa.APIRouter()
 
 
+def auth_required(func: ty.Callable) -> ty.Callable:
+    @wraps(func)
+    async def wrapper(
+        request: fa.Request, *args: ty.Any, **kwargs: ty.Any
+    ) -> JSONResponse:
+        try:
+            payload = verify_request(request)
+        except AuthException as e:
+            return JSONResponse(
+                content={"error": str(e)}, status_code=fa.status.HTTP_401_UNAUTHORIZED
+            )
+        request.payload = payload
+        return await func(*args, request=request, **kwargs)
+
+    return wrapper
+
+
 @issue_router.get(
     "/issues",
-    response_description="List My Issues",
+    summary="List My Issues",
     status_code=fa.status.HTTP_200_OK,
     response_model=Issue,
 )
+@auth_required
 async def issues_list(request: fa.Request) -> JSONResponse:
-    try:
-        payload = verify_request(request)
-    except AuthZException as e:
-        return JSONResponse(
-            content={"error": str(e)}, status_code=fa.status.HTTP_401_UNAUTHORIZED
-        )  # TODO: put this into a decorator
-
     return JSONResponse(
         content=list(
-            request.app.db[Issue.__name__].find({"assignee_id": payload.user_id})
+            request.app.db[Issue.__name__].find(
+                {"assignee_id": request.payload.user_id}
+            )
         ),
         status_code=fa.status.HTTP_200_OK,
     )
@@ -69,16 +87,18 @@ async def issues_list(request: fa.Request) -> JSONResponse:
 
 @issue_router.post(
     "/issues",
-    response_description="Create Issue",
+    summary="Create Issue",
+    response_description="Issue created",
     status_code=fa.status.HTTP_201_CREATED,
     response_model=Issue,
 )
+@auth_required
 async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
-    try:
-        verify_request(request)
-    except AuthZException as e:
+    user = request.app.db[User.__name__].find_one({"user_id": issue.assignee_id})
+    if user is None:
         return JSONResponse(
-            content={"error": str(e)}, status_code=fa.status.HTTP_401_UNAUTHORIZED
+            {"error": f"User with user_id {issue.assignee_id} does not exist"},
+            status_code=fa.status.HTTP_404_NOT_FOUND,
         )
 
     issue = request.app.db[Issue.__name__].insert_one(to_json(issue))
@@ -89,20 +109,15 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
 
 @issue_router.put(
     "/issues/{issue_id}/done",
-    response_description="Put Issue to Done",
+    summary="Put Issue to Done",
+    response_description="Updated status to 'done'",
     status_code=fa.status.HTTP_200_OK,
     response_model=Issue,
 )
+@auth_required
 async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
-    try:
-        payload = verify_request(request)
-    except AuthZException as e:
-        return JSONResponse(
-            content={"error": str(e)}, status_code=fa.status.HTTP_401_UNAUTHORIZED
-        )
-
     update_report = request.app.db[Issue.__name__].update_one(
-        {"_id": issue_id, "assignee_id": payload.user_id},
+        {"_id": issue_id, "assignee_id": request.payload.user_id},
         {"$set": {"status": IssueStatus.done.value}},
     )
     if update_report.matched_count == 0:
@@ -113,29 +128,15 @@ async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
     return JSONResponse(content={}, status_code=fa.status.HTTP_200_OK)
 
 
-async def shuffle_issues(request: fa.Request, user_id_list: ty.List[str]):
-    for issue_document in request.app.db[Issue.__name__].find(
-        {"status": IssueStatus.todo.value}
-    ):
-        assignee_id = random.choice(user_id_list)
-        request.app.db[Issue.__name__].update_one(
-            {"_id": issue_document["_id"]}, {"$set": {"assignee_id": assignee_id}}
-        )
-
-
 @issue_router.post(
     "/issues/shuffle",
-    response_description="Shuffle Issue between Users",
+    summary="Shuffle Issue between Users",
+    response_description="Issues' assignees shuffled",
     status_code=fa.status.HTTP_200_OK,
 )
+@auth_required
 async def issues_shuffle(request: fa.Request) -> JSONResponse:
-    try:
-        payload = verify_request(request)
-    except AuthZException as e:
-        return JSONResponse(
-            content={"error": str(e)}, status_code=fa.status.HTTP_401_UNAUTHORIZED
-        )
-    if payload.role != UserRole.admin:
+    if request.payload.role != UserRole.admin:
         return JSONResponse(
             content={"error": "Only admins can shuffle"},
             status_code=fa.status.HTTP_403_FORBIDDEN,
@@ -150,7 +151,7 @@ async def issues_shuffle(request: fa.Request) -> JSONResponse:
             content={"error": "No users found"}, status_code=fa.status.HTTP_409_CONFLICT
         )
 
-    await shuffle_issues(request, user_id_list)  # async or no?
+    shuffle_issues(request, user_id_list)
     return JSONResponse(content={}, status_code=fa.status.HTTP_200_OK)
 
 

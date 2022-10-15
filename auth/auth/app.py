@@ -8,7 +8,8 @@ from time import sleep
 import fastapi as fa
 import kafka
 import jwt
-from common.proto.auth import AuthNPayload, AuthNRequest, AuthNResponse
+from common import topics
+from common.proto.auth import AuthPayload, AuthRequest, AuthResponse
 from fastapi.encoders import jsonable_encoder as to_json
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
@@ -43,6 +44,7 @@ def startup() -> ty.Any:
             app.kafka_producer = kafka.KafkaProducer(
                 bootstrap_servers=f"{KAFKA_SERVER}:{KAFKA_PORT}",
                 value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+                linger_ms=100,
             )
         except kafka.errors.NoBrokersAvailable:
             logging.info(f"No brokers available, retrying in {delay} seconds")
@@ -66,50 +68,66 @@ user_router = fa.APIRouter()
 
 @user_router.get(
     "/users/{user_id}",
-    response_description="Read user by ID",
+    summary="Read user by Public ID",
     status_code=fa.status.HTTP_200_OK,
     response_model=User,
 )
 async def read_user(request: fa.Request, user_id: str) -> JSONResponse:
-    user_account = request.app.db[User.__name__].find_one({"uuid": user_id})
-    return JSONResponse(content=user_account, status_code=fa.status.HTTP_200_OK)
+    user_document = request.app.db[User.__name__].find_one({"user_id": user_id})
+    if user_document is None:
+        return JSONResponse(
+            {"error": "User not found"}, status_code=fa.status.HTTP_404_NOT_FOUND
+        )
+    user = User(**user_document)
+    user.secret = "***"
+
+    return JSONResponse(content=to_json(user), status_code=fa.status.HTTP_200_OK)
 
 
 @user_router.post(
     "/users/",
-    response_description="Create User",
+    summary="Create User",
+    response_description="User created",
     status_code=fa.status.HTTP_201_CREATED,
     response_model=User,
 )
 async def create_user(request: fa.Request, user: User) -> JSONResponse:
     user = ty.cast(User, hexify_secret(user))
+    if request.app.db[User.__name__].find_one({"user_id": user.user_id}) is not None:
+        return JSONResponse(
+            content={"error": "User already exists."},
+            status_code=fa.status.HTTP_409_CONFLICT,
+        )
     request.app.db[User.__name__].insert_one(to_json(user))
 
     user.secret = "***"
-    app.kafka_producer.send("User.Created", to_json(user)).get(timeout=1)
+    app.kafka_producer.send(topics.USER_CREATED, to_json(user))
 
     return JSONResponse(content=to_json(user), status_code=fa.status.HTTP_201_CREATED)
 
 
-@user_router.post(
-    "/authN",
-    response_description="AuthN",
+auth_router = fa.APIRouter()
+
+
+@auth_router.post(
+    "/authenticate",
+    summary="Authenticate credentials",
+    response_description="User authenticated",
     status_code=fa.status.HTTP_200_OK,
-    response_model=AuthNResponse,
+    response_model=AuthResponse,
 )
-async def authn(request: fa.Request, authn_request: AuthNRequest) -> JSONResponse:
+async def authn(request: fa.Request, auth_request: AuthRequest) -> JSONResponse:
     user_data = request.app.db[User.__name__].find_one(
-        to_json(hexify_secret(authn_request))
+        to_json(hexify_secret(auth_request))
     )
     if user_data is None:
         return JSONResponse(
             content={"error": "User not found"},
             status_code=fa.status.HTTP_404_NOT_FOUND,
         )
-
     user = User(**user_data)
 
-    payload = AuthNPayload(
+    payload = AuthPayload(
         user_id=user.user_id,
         role=user.role,
         expires_at=dt.datetime.utcnow() + dt.timedelta(seconds=EXPIRESSECONDS),
@@ -117,18 +135,19 @@ async def authn(request: fa.Request, authn_request: AuthNRequest) -> JSONRespons
     token = jwt.encode(to_json(payload), AUTHSECRET, algorithm="HS256")
 
     return JSONResponse(
-        content=to_json(AuthNResponse(token=token, expires_at=payload.expires_at)),
+        content=to_json(AuthResponse(token=token, expires_at=payload.expires_at)),
         status_code=fa.status.HTTP_200_OK,
     )
 
 
-@user_router.post(
-    "/authZ",
-    response_description="AuthZ",
+@auth_router.post(
+    "/verify",
+    summary="Verify token",
+    response_description="Token authorized",
     status_code=fa.status.HTTP_200_OK,
-    response_model=AuthNPayload,
+    response_model=AuthPayload,
 )
-async def authz(request: fa.Request):
+async def verify(request: fa.Request):
     auth_header = request.headers.get("authorization")
     if auth_header is None:
         return JSONResponse(
@@ -137,7 +156,7 @@ async def authz(request: fa.Request):
         )
     token = auth_header.replace("Bearer ", "")
     try:
-        decoded = AuthNPayload(**jwt.decode(token, AUTHSECRET, algorithms=["HS256"]))
+        decoded = AuthPayload(**jwt.decode(token, AUTHSECRET, algorithms=["HS256"]))
     except jwt.exceptions.DecodeError:  # type: ignore
         return JSONResponse(
             content={"error": "Couldn't decode token"},
@@ -148,7 +167,13 @@ async def authz(request: fa.Request):
             content={"error": "Wrong payload type"},
             status_code=fa.status.HTTP_400_BAD_REQUEST,
         )
+    if decoded.expires_at <= dt.datetime.utcnow():
+        return JSONResponse(
+            content={"error": "Token expired"},
+            status_code=fa.status.HTTP_401_UNAUTHORIZED,
+        )
     return JSONResponse(content=to_json(decoded), status_code=fa.status.HTTP_200_OK)
 
 
-app.include_router(user_router, tags=["Auth"], prefix="/user")
+app.include_router(user_router, tags=["Users"], prefix="/user")
+app.include_router(auth_router, tags=["Auth"], prefix="/auth")
