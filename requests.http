@@ -37,12 +37,12 @@ curl localhost/ | jq
 
 curl localhost:81/issues/issues | jq
 
-curl localhost:81/issues/issues -H "Authorization: ${TOKEN}" | jq .[0]
-
 curl -XPOST localhost:81/issues/issues -H "Content-Type: application/json" -H "Authorization: ${TOKEN}" \
-    -d '{"description": "description-123", "status": "todo", "assignee_id": 123}' | jq
+    -d '{"description": "[jira-id123] description-123", "status": "todo", "assignee_id": 123}' | jq
 curl -XPOST localhost:81/issues/issues -H "Content-Type: application/json" -H "Authorization: ${TOKEN}" \
-    -d '{"description": "description-456", "status": "todo", "assignee_id": 456}' | jq
+    -d '{"description": "[jira-id456] description-456", "status": "todo", "assignee_id": 123}' | jq
+curl -XPOST localhost:81/issues/issues -H "Content-Type: application/json" -H "Authorization: ${TOKEN}" \
+    -d '{"description": "description-789-no-jira-id", "status": "todo", "assignee_id": 456}' | jq
 
 # unknown user_id
 curl -XPOST localhost:81/issues/issues -H "Content-Type: application/json" -H "Authorization: ${TOKEN}" \
@@ -55,5 +55,7 @@ curl -XPUT localhost:81/issues/issues/${ISSUE_ID}/done -H "Authorization: ${TOKE
 curl -XPUT localhost:81/issues/issues/123456/done -H "Authorization: ${TOKEN}" | jq
 
 curl -XPOST localhost:81/issues/issues/shuffle -H "Authorization: ${TOKEN}" | jq
+
+curl localhost:81/issues/issues -H "Authorization: ${TOKEN}" | jq
 
 curl localhost:81/ | jq

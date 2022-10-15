@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from tasktracker.auth import AuthException, verify_request
 from tasktracker.models import Issue, IssueStatus, User
-from tasktracker.utils import shuffle_issues
+from tasktracker.utils import shuffle_issues, split_description_jira_id
 
 DB_HOST = os.environ["DB_HOST"]
 DB_PORT = os.environ["DB_PORT"]
@@ -125,6 +125,11 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
             ),
             status_code=fa.status.HTTP_404_NOT_FOUND,
         )
+
+    # extract jira_id from desc if popug typed in "[UBERPOPOG-42] -- Change all colors"
+    description, jira_id = split_description_jira_id(issue.description)
+    issue.description = description
+    issue.jira_id = jira_id
 
     inserted_issue = request.app.db[Issue.__name__].insert_one(to_json(issue))
     returned_data = {"issue_id": inserted_issue.inserted_id}

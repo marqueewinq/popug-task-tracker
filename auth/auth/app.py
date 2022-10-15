@@ -91,6 +91,7 @@ async def read_user(request: fa.Request, user_id: str) -> JSONResponse:
 )
 async def create_user(request: fa.Request, user: User) -> JSONResponse:
     user = ty.cast(User, hexify_secret(user))
+    # TODO: uncomment this check
     # if request.app.db[User.__name__].find_one({"user_id": user.user_id}) is not None:
     #     return JSONResponse(
     #         content={"error": "User already exists."},

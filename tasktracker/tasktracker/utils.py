@@ -2,6 +2,8 @@ import typing as ty
 
 import fastapi as fa
 import random
+import re
+
 
 from common import topics
 from tasktracker.models import Issue, IssueStatus
@@ -27,3 +29,11 @@ def shuffle_issues(request: fa.Request, user_id_list: ty.List[str]):
                 assigned_from=assigned_from, assigned_to=assigned_to
             ),
         )
+
+
+def split_description_jira_id(description: str) -> ty.Tuple[str, str]:
+    result = re.findall(r"\[.*?\]", description)
+    if len(result) != 1:
+        return description, ""
+    jira_id = result[0]
+    return description.replace(jira_id, ""), jira_id
