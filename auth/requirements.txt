@@ -1,5 +1,5 @@
 fastapi==0.83.0
 uvicorn==0.18.3
 pymongo[srv]==4.2.0
-pyjwt==1.7.1
+pyjwt==2.4.0
 kafka-python==2.0.2
