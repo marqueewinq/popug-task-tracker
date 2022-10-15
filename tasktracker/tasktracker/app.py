@@ -129,7 +129,16 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
     inserted_issue = request.app.db[Issue.__name__].insert_one(to_json(issue))
     returned_data = {"issue_id": inserted_issue.inserted_id}
 
-    request.app.kafka_producer.send(topics.TASK_CREATED, returned_data)
+    topics.send_to_topic(
+        request.app.kafka_producer,
+        topics.ISSUE_CREATED,
+        topics.IssueOnlyIdSchema(**returned_data),
+    )
+    topics.send_to_topic(
+        request.app.kafka_producer,
+        topics.ISSUE_ASSIGNED,
+        topics.IssueReassignedSchema(assigned_to=issue.assignee_id),
+    )
 
     return JSONResponse(content=returned_data, status_code=fa.status.HTTP_201_CREATED)
 
@@ -156,7 +165,11 @@ async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
 
     returned_data = {"issue_id": issue_id}
 
-    request.app.kafka_producer.send(topics.TASK_DONE, returned_data)
+    topics.send_to_topic(
+        request.app.kafka_producer,
+        topics.ISSUE_DONE,
+        topics.IssueOnlyIdSchema(**returned_data),
+    )
 
     return JSONResponse(content=returned_data, status_code=fa.status.HTTP_200_OK)
 

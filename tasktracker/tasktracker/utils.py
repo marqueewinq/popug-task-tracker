@@ -20,7 +20,10 @@ def shuffle_issues(request: fa.Request, user_id_list: ty.List[str]):
             {"_id": issue.uuid}, {"$set": {"assignee_id": assigned_to}}
         )
 
-        request.app.kafka_producer.send(
-            topics.TASK_ASSIGNED,
-            {"assigned_from": assigned_from, "assigned_to": assigned_to},
+        topics.send_to_topic(
+            request.app.kafka_producer,
+            topics.ISSUE_ASSIGNED,
+            topics.IssueReassignedSchema(
+                assigned_from=assigned_from, assigned_to=assigned_to
+            ),
         )

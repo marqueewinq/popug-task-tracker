@@ -28,24 +28,24 @@ mongo_url = (
 logging.basicConfig(level=logging.INFO)
 
 
-def replicate_user(data):
+def replicate_user(data: topics.UserCreatedSchema) -> None:
     db = MongoClient(mongo_url)[DB_NAME]
-    user = User(user_id=data["user_id"])
+    user = User(user_id=data.user_id)
     inserted_user = db[User.__name__].insert_one(to_json(user))
     logging.info(f"Created user {inserted_user.inserted_id}")
 
 
-def start_consumer(topic_name, consumer_callback):
+def start_consumer(topic: topics.Topic, consumer_callback: ty.Callable) -> None:
     consumer = kafka.KafkaConsumer(
-        topic_name,
-        bootstrap_servers=[f"{KAFKA_SERVER}:{KAFKA_PORT}"],
+        topic.name,
+        bootstrap_servers=f"{KAFKA_SERVER}:{KAFKA_PORT}",
         value_deserializer=lambda x: json.loads(x.decode("utf-8")),
         enable_auto_commit=True,
     )
-    logging.info(f"Started listening on {topic_name}")
+    logging.info(f"Started listening on {topic.name}")
 
     for message in consumer:
-        logging.debug(
+        logging.info(
             "Received: %s:%d:%d: key=%s value=%s"
             % (
                 message.topic,
@@ -55,19 +55,29 @@ def start_consumer(topic_name, consumer_callback):
                 message.value,
             )
         )
-        consumer_callback(message.value)
+        validated_data = topic.base_model(**message.value)
+        try:
+            consumer_callback(validated_data)
+        except Exception as e:
+            logging.exception(e)
+            raise
 
 
 consumer_config: ty.Dict[str, ty.Callable] = {topics.USER_CREATED: replicate_user}
 
 
 def main():
-    logging.info("Starting listening on topics: " + ", ".join(consumer_config.keys()))
+    logging.info(
+        "Threding listeners on topics: "
+        + ", ".join([topic.name for topic in consumer_config.keys()])
+    )
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=len(consumer_config)
     ) as executor:
-        for topic_name, consumer_callback in consumer_config.items():
-            executor.submit(start_consumer, topic_name, consumer_callback)
+        for topic, consumer_callback in consumer_config.items():
+            executor.submit(start_consumer, topic, consumer_callback)
+
+    # start_consumer(topics.USER_CREATED, replicate_user)
 
 
 if __name__ == "__main__":
