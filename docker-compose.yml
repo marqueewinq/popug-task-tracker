@@ -58,6 +58,7 @@ services:
       AUTH_URL: "http://auth/"
       VERSION: "${TASKTRACKER_VERSION:-tasktracker-0.0.1}"
       << : *shared-envvar-db
+      << : *shared-envvar-kafka
     ports:
       - "81:80"
     volumes:
@@ -69,6 +70,7 @@ services:
     networks:
       - internal
       - tasktracker
+      - kafka
 
   tasktracker-listener:
     image: popug_tasktracker

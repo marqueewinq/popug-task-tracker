@@ -3,7 +3,9 @@ import typing as ty
 from functools import wraps
 
 import fastapi as fa
+from common import topics
 from common.proto.auth import UserRole
+from common.connectors import create_kafka_producer
 from fastapi.encoders import jsonable_encoder as to_json
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
@@ -18,6 +20,9 @@ DB_USER = os.environ["MONGO_INITDB_ROOT_USERNAME"]
 DB_PASS = os.environ["MONGO_INITDB_ROOT_PASSWORD"]
 DB_NAME = os.environ["DB_DATABASE"]
 AUTH_URL = os.environ["AUTH_URL"]
+
+KAFKA_PORT = os.environ["KAFKA_PORT"]
+KAFKA_SERVER = os.environ["KAFKA_SERVER"]
 
 VERSION = os.getenv("VERSION")
 
@@ -35,6 +40,8 @@ def startup() -> ty.Any:
     app.db = app.client[DB_NAME]
 
     app.auth_url = AUTH_URL
+
+    app.kafka_producer = create_kafka_producer(f"{KAFKA_SERVER}:{KAFKA_PORT}")
 
 
 @app.on_event("shutdown")
@@ -101,10 +108,12 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
             status_code=fa.status.HTTP_404_NOT_FOUND,
         )
 
-    issue = request.app.db[Issue.__name__].insert_one(to_json(issue))
-    return JSONResponse(
-        content={"id": issue.inserted_id}, status_code=fa.status.HTTP_200_OK
-    )
+    inserted_issue = request.app.db[Issue.__name__].insert_one(to_json(issue))
+    returned_data = {"issue_id": inserted_issue.inserted_id}
+
+    request.app.kafka_producer.send(topics.TASK_CREATED, returned_data)
+
+    return JSONResponse(content=returned_data, status_code=fa.status.HTTP_200_OK)
 
 
 @issue_router.put(
@@ -125,7 +134,12 @@ async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
             content={"error": f"Issue {issue_id} not found"},
             status_code=fa.status.HTTP_404_NOT_FOUND,
         )
-    return JSONResponse(content={}, status_code=fa.status.HTTP_200_OK)
+
+    returned_data = {"issue_id": issue_id}
+
+    request.app.kafka_producer.send(topics.TASK_DONE, returned_data)
+
+    return JSONResponse(content=returned_data, status_code=fa.status.HTTP_200_OK)
 
 
 @issue_router.post(
