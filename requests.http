@@ -1,0 +1,59 @@
+#!/bin/bash
+set -euxo pipefail
+
+# auth
+
+curl localhost/user/users/abcde | jq
+
+curl -XPOST localhost/user/users/ -H "Content-Type: application/json" \
+    -d '{"user_id": 123, "secret": "correct", "role": "admin"}' | jq
+curl -XPOST localhost/user/users/ -H "Content-Type: application/json" \
+    -d '{"user_id": 456, "secret": "correct", "role": "regular"}' | jq
+curl -XPOST localhost/user/users/ -H "Content-Type: application/json" \
+    -d '{"user_id": 789, "secret": "correct", "role": "regular"}' | jq
+
+curl localhost/user/users/123 | jq
+
+curl -XPOST localhost/auth/authenticate -H "Content-Type: application/json" \
+    -d '{"user_id": 123, "secret": "incorrect"}' | jq
+
+curl -XPOST localhost/auth/authenticate -H "Content-Type: application/json" \
+    -d '{"user_id": 123, "secret": "correct"}' | jq
+
+TOKEN=$(curl localhost/auth/authenticate -H "Content-Type: application/json" \
+    -d '{"user_id": 123, "secret": "correct"}' | jq .token -r)
+
+curl -XPOST localhost/auth/verify -H "Content-Type: application/json" -H "Authorization: ${TOKEN}" | jq
+
+curl -XPOST localhost/auth/verify -H "Content-Type: application/json" -H "Authorization: incorrect" | jq
+
+# expired token
+curl localhost:81/issues/issues -H 'Authorization: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiMTIzIiwicm9sZSI6ImFkbWluIiwiZXhwaXJlc19hdCI6IjIwMjItMTAtMDlUMTU6MjI6NTYuMjg4MzEzIn0.MKtDbgmQxM0qLzux3TqBtur6hxdDZ9LbakKyzqb33RE' \
+    | jq
+
+curl localhost/ | jq
+
+# tasktracker
+
+curl localhost:81/issues/issues | jq
+
+curl localhost:81/issues/issues -H "Authorization: ${TOKEN}" | jq .[0]
+
+curl -XPOST localhost:81/issues/issues -H "Content-Type: application/json" -H "Authorization: ${TOKEN}" \
+    -d '{"description": "description-123", "status": "todo", "assignee_id": 123}' | jq
+curl -XPOST localhost:81/issues/issues -H "Content-Type: application/json" -H "Authorization: ${TOKEN}" \
+    -d '{"description": "description-456", "status": "todo", "assignee_id": 456}' | jq
+
+# unknown user_id
+curl -XPOST localhost:81/issues/issues -H "Content-Type: application/json" -H "Authorization: ${TOKEN}" \
+    -d '{"description": "description-456", "status": "todo", "assignee_id": 100500}' | jq
+
+curl localhost:81/issues/issues -H "Authorization: ${TOKEN}" | jq .[0]
+ISSUE_ID=$(curl localhost:81/issues/issues -H "Authorization: ${TOKEN}" | jq .[0]._id -r)
+
+curl -XPUT localhost:81/issues/issues/${ISSUE_ID}/done -H "Authorization: ${TOKEN}" | jq
+curl -XPUT localhost:81/issues/issues/123456/done -H "Authorization: ${TOKEN}" | jq
+
+curl -XPOST localhost:81/issues/issues/shuffle -H "Authorization: ${TOKEN}" | jq
+
+curl localhost:81/ | jq
