@@ -3,19 +3,16 @@ import os
 import typing as ty
 
 import fastapi as fa
-
 import jwt
 from common import topics
-from common.connectors import create_kafka_producer
+from common.connectors import create_db_client, create_kafka_producer
 from common.proto.auth import AuthPayload, AuthRequest, AuthResponse
-from common.proto.common import VersionContent, ErrorContent
+from common.proto.common import ErrorContent, VersionContent
 from fastapi.encoders import jsonable_encoder as to_json
 from fastapi.responses import JSONResponse
-from pymongo import MongoClient
 
 from auth.models import User
 from auth.utils import hexify_secret
-
 
 DB_HOST = os.environ["DB_HOST"]
 DB_PORT = os.environ["DB_PORT"]
@@ -35,10 +32,10 @@ app = fa.FastAPI(title=str(__package__), version=VERSION)
 
 @app.on_event("startup")
 def startup() -> ty.Any:
-    url = f"mongodb://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/?retryWrites=true&w=majority"
-    app.client = MongoClient(url)
+    app.client = create_db_client(
+        f"mongodb://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/?retryWrites=true&w=majority"
+    )
     app.db = app.client[DB_NAME]
-
     app.kafka_producer = create_kafka_producer(f"{KAFKA_SERVER}:{KAFKA_PORT}")
 
 
