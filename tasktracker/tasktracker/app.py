@@ -122,14 +122,6 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
             issue_id=inserted_issue.inserted_id, assignee_id=issue.assignee_id
         ),
     )
-    topics.send_to_topic(
-        request.app.kafka_producer,
-        topics.ISSUE_ASSIGNED,
-        topics.IssueReassignedSchema(
-            issue_id=inserted_issue.inserted_id, assigned_to=issue.assignee_id
-        ),
-    )
-
     return JSONResponse(content=returned_data, status_code=fa.status.HTTP_201_CREATED)
 
 

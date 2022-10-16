@@ -67,13 +67,15 @@ def replicate_issue_created(data: topics.IssueAssignedSchema) -> None:
     )
     account.balance -= cost_for_assign
     system_account.balance += cost_for_assign
+    logging.warning(f"{system_account.balance=}")
 
     # TODO: with atomic commit
     db[Account.__name__].update_one(
-        {"_id": account.uuid}, {"$set": {"balance": account.balance}}
+        {"user_id": account.user_id}, {"$set": {"balance": account.balance}}
     )
     db[Account.__name__].update_one(
-        {"_id": SYSTEM_ACCOUNT_USER_ID}, {"$set": {"balance": system_account.balance}}
+        {"user_id": SYSTEM_ACCOUNT_USER_ID},
+        {"$set": {"balance": system_account.balance}},
     )
     db[Transaction.__name__].insert_one(to_json(transaction))
     db[Issue.__name__].insert_one(to_json(issue))
@@ -103,12 +105,14 @@ def replicate_issue_reassign(data: topics.IssueReassignedSchema) -> None:
     )
     account.balance -= amount
     system_account.balance += amount
+    logging.warning(f"{system_account.balance=}")
 
     db[Account.__name__].update_one(
-        {"_id": account.uuid}, {"$set": {"balance": account.balance}}
+        {"user_id": account.user_id}, {"$set": {"balance": account.balance}}
     )
     db[Account.__name__].update_one(
-        {"_id": SYSTEM_ACCOUNT_USER_ID}, {"$set": {"balance": system_account.balance}}
+        {"user_id": SYSTEM_ACCOUNT_USER_ID},
+        {"$set": {"balance": system_account.balance}},
     )
     db[Transaction.__name__].insert_one(to_json(transaction))
     logging.info(f"Created Transaction: {transaction.dict()}")
@@ -138,13 +142,15 @@ def replicate_issue_done(data: topics.IssueAssignedSchema) -> None:
     )
     account.balance += amount
     system_account.balance -= amount
+    logging.warning(f"{system_account.balance=}")
 
     # TODO: with atomic commit
     db[Account.__name__].update_one(
-        {"_id": account.uuid}, {"$set": {"balance": account.balance}}
+        {"user_id": account.user_id}, {"$set": {"balance": account.balance}}
     )
     db[Account.__name__].update_one(
-        {"_id": SYSTEM_ACCOUNT_USER_ID}, {"$set": {"balance": system_account.balance}}
+        {"user_id": SYSTEM_ACCOUNT_USER_ID},
+        {"$set": {"balance": system_account.balance}},
     )
     db[Transaction.__name__].insert_one(to_json(transaction))
     db[Issue.__name__].update_one(
