@@ -21,16 +21,18 @@ class UserCreatedSchema(BaseModel):
     full_name: str
 
 
-class IssueOnlyIdSchema(BaseModel):
+class IssueAssignedSchema(BaseModel):
     issue_id: str
+    assignee_id: str
 
 
 class IssueReassignedSchema(BaseModel):
+    issue_id: str
     assigned_to: str
     assigned_from: ty.Optional[str] = None
 
 
 USER_CREATED = Topic(name="User.Created.0", base_model=UserCreatedSchema)
-ISSUE_CREATED = Topic(name="Issue.Created.0", base_model=IssueOnlyIdSchema)
+ISSUE_CREATED = Topic(name="Issue.Created.0", base_model=IssueAssignedSchema)
 ISSUE_ASSIGNED = Topic(name="Issue.Assigned.0", base_model=IssueReassignedSchema)
-ISSUE_DONE = Topic(name="Issue.MarkedDone.0", base_model=IssueOnlyIdSchema)
+ISSUE_DONE = Topic(name="Issue.MarkedDone.0", base_model=IssueAssignedSchema)

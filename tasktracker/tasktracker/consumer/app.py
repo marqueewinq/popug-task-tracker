@@ -1,16 +1,12 @@
-import concurrent.futures
-import json
+import logging
 import os
 import sys
 import typing as ty
-import logging
 
 from common import topics
 from fastapi.encoders import jsonable_encoder as to_json
-import kafka
 from pymongo import MongoClient
 from tasktracker.models import User
-
 
 DB_HOST = os.environ["DB_HOST"]
 DB_PORT = os.environ["DB_PORT"]
@@ -30,57 +26,24 @@ logging.basicConfig(level=logging.INFO)
 
 def replicate_user(data: topics.UserCreatedSchema) -> None:
     db = MongoClient(mongo_url)[DB_NAME]
+
+    if db[User.__name__].find_one({"user_id": data.user_id}) is not None:
+        logging.info("Account already exists")
+        return
+
     user = User(user_id=data.user_id)
-    inserted_user = db[User.__name__].insert_one(to_json(user))
-    logging.info(f"Created user {inserted_user.inserted_id}")
+    db[User.__name__].insert_one(to_json(user))
+    logging.info(f"Created user {data.user_id}")
 
 
-def start_consumer(topic: topics.Topic, consumer_callback: ty.Callable) -> None:
-    consumer = kafka.KafkaConsumer(
-        topic.name,
-        bootstrap_servers=f"{KAFKA_SERVER}:{KAFKA_PORT}",
-        value_deserializer=lambda x: json.loads(x.decode("utf-8")),
-        enable_auto_commit=True,
-    )
-    logging.info(f"Started listening on {topic.name}")
-
-    for message in consumer:
-        logging.info(
-            "Received: %s:%d:%d: key=%s value=%s"
-            % (
-                message.topic,
-                message.partition,
-                message.offset,
-                message.key,
-                message.value,
-            )
-        )
-        validated_data = topic.base_model(**message.value)
-        try:
-            consumer_callback(validated_data)
-        except Exception as e:
-            logging.exception(e)
-            raise
-
-
-consumer_config: ty.Dict[str, ty.Callable] = {topics.USER_CREATED: replicate_user}
-
-
-def main():
-    logging.info(
-        "Threding listeners on topics: "
-        + ", ".join([topic.name for topic in consumer_config.keys()])
-    )
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=len(consumer_config)
-    ) as executor:
-        for topic, consumer_callback in consumer_config.items():
-            executor.submit(start_consumer, topic, consumer_callback)
-
-    # start_consumer(topics.USER_CREATED, replicate_user)
+consumer_config: ty.Dict[topics.Topic, ty.Callable] = {
+    topics.USER_CREATED: replicate_user
+}
 
 
 if __name__ == "__main__":
-    main()
+    kafka_url = f"{KAFKA_SERVER}:{KAFKA_PORT}"
+    topics.start_consumers(consumer_config, kafka_url)
 
+    logging.warning("All threads finished, exiting...")
     sys.exit(99)

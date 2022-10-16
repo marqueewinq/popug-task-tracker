@@ -26,7 +26,9 @@ def shuffle_issues(request: fa.Request, user_id_list: ty.List[str]):
             request.app.kafka_producer,
             topics.ISSUE_ASSIGNED,
             topics.IssueReassignedSchema(
-                assigned_from=assigned_from, assigned_to=assigned_to
+                assigned_from=assigned_from,
+                assigned_to=assigned_to,
+                issue_id=issue.uuid,
             ),
         )
 

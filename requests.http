@@ -22,6 +22,8 @@ curl -XPOST localhost/auth/authenticate -H "Content-Type: application/json" \
 
 TOKEN=$(curl localhost/auth/authenticate -H "Content-Type: application/json" \
     -d '{"user_id": 123, "secret": "correct"}' | jq .token -r)
+TOKENREG=$(curl localhost/auth/authenticate -H "Content-Type: application/json" \
+    -d '{"user_id": 456, "secret": "correct"}' | jq .token -r)
 
 curl -XPOST localhost/auth/verify -H "Content-Type: application/json" -H "Authorization: ${TOKEN}" | jq
 
@@ -55,7 +57,25 @@ curl -XPUT localhost:81/issues/issues/${ISSUE_ID}/done -H "Authorization: ${TOKE
 curl -XPUT localhost:81/issues/issues/123456/done -H "Authorization: ${TOKEN}" | jq
 
 curl -XPOST localhost:81/issues/issues/shuffle -H "Authorization: ${TOKEN}" | jq
+curl -XPOST localhost:81/issues/issues/shuffle -H "Authorization: ${TOKEN}" | jq
+curl -XPOST localhost:81/issues/issues/shuffle -H "Authorization: ${TOKEN}" | jq
 
 curl localhost:81/issues/issues -H "Authorization: ${TOKEN}" | jq
 
 curl localhost:81/ | jq
+
+# billing
+
+curl localhost:82/accounts/accounts -H "Authorization: ${TOKEN}" | jq
+curl localhost:82/accounts/accounts -H "Authorization: ${TOKENREG}" | jq
+curl localhost:82/accounts/accounts/123/transactions -H "Authorization: ${TOKENREG}" | jq
+curl localhost:82/accounts/accounts/123/transactions -H "Authorization: ${TOKEN}" | jq
+curl localhost:82/accounts/accounts/456/transactions -H "Authorization: ${TOKENREG}" | jq
+
+curl localhost:82/accounts/lastday -H "Authorization: ${TOKEN}" | jq
+curl localhost:82/accounts/lastday -H "Authorization: ${TOKENREG}" | jq
+
+curl localhost:82/accounts/accounts -H "Authorization: ${TOKEN}" | jq
+curl localhost:82/accounts/accounts/sys/transactions -H "Authorization: ${TOKEN}" | jq
+
+curl localhost:82/ | jq
