@@ -99,7 +99,11 @@ async def create_user(request: fa.Request, user: User) -> JSONResponse:
     request.app.db[User.__name__].insert_one(to_json(user))
 
     user.secret = "***"
-    request.app.kafka_producer.send(topics.USER_CREATED, to_json(user))
+    topics.send_to_topic(
+        request.app.kafka_producer,
+        topics.USER_CREATED,
+        topics.UserCreatedSchema(**to_json(user)),
+    )
 
     return JSONResponse(content=to_json(user), status_code=fa.status.HTTP_201_CREATED)
 

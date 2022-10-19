@@ -1,18 +1,17 @@
 import os
 import typing as ty
-from functools import wraps
 
 import fastapi as fa
 from common import topics
+from common.auth import auth_required
 from common.connectors import create_db_client, create_kafka_producer
 from common.proto.auth import UserRole
 from common.proto.common import ErrorContent, VersionContent
 from fastapi.encoders import jsonable_encoder as to_json
 from fastapi.responses import JSONResponse
 
-from tasktracker.auth import AuthException, verify_request
 from tasktracker.models import Issue, IssueStatus, User
-from tasktracker.utils import shuffle_issues
+from tasktracker.utils import shuffle_issues, split_description_jira_id
 
 DB_HOST = os.environ["DB_HOST"]
 DB_PORT = os.environ["DB_PORT"]
@@ -64,24 +63,6 @@ async def root() -> dict:
 issue_router = fa.APIRouter()
 
 
-def auth_required(func: ty.Callable) -> ty.Callable:
-    @wraps(func)
-    async def wrapper(
-        request: fa.Request, *args: ty.Any, **kwargs: ty.Any
-    ) -> JSONResponse:
-        try:
-            payload = verify_request(request)
-        except AuthException as e:
-            return JSONResponse(
-                content=to_json(ErrorContent(message=str(e))),
-                status_code=fa.status.HTTP_401_UNAUTHORIZED,
-            )
-        request.payload = payload
-        return await func(*args, request=request, **kwargs)
-
-    return wrapper
-
-
 @issue_router.get(
     "/issues",
     summary="List My Issues",
@@ -93,7 +74,7 @@ async def issues_list(request: fa.Request) -> JSONResponse:
     return JSONResponse(
         content=list(
             request.app.db[Issue.__name__].find(
-                {"assignee_id": request.payload.user_id}
+                {"assignee_id": request.auth_payload.user_id}
             )
         ),
         status_code=fa.status.HTTP_200_OK,
@@ -126,11 +107,21 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
             status_code=fa.status.HTTP_404_NOT_FOUND,
         )
 
+    # extract jira_id from desc if popug typed in "[UBERPOPOG-42] -- Change all colors"
+    description, jira_id = split_description_jira_id(issue.description)
+    issue.description = description
+    issue.jira_id = jira_id
+
     inserted_issue = request.app.db[Issue.__name__].insert_one(to_json(issue))
     returned_data = {"issue_id": inserted_issue.inserted_id}
 
-    request.app.kafka_producer.send(topics.TASK_CREATED, returned_data)
-
+    topics.send_to_topic(
+        request.app.kafka_producer,
+        topics.ISSUE_CREATED,
+        topics.IssueAssignedSchema(
+            issue_id=inserted_issue.inserted_id, assignee_id=issue.assignee_id
+        ),
+    )
     return JSONResponse(content=returned_data, status_code=fa.status.HTTP_201_CREATED)
 
 
@@ -145,7 +136,7 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
 @auth_required
 async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
     update_report = request.app.db[Issue.__name__].update_one(
-        {"_id": issue_id, "assignee_id": request.payload.user_id},
+        {"_id": issue_id, "assignee_id": request.auth_payload.user_id},
         {"$set": {"status": IssueStatus.done.value}},
     )
     if update_report.matched_count == 0:
@@ -156,7 +147,13 @@ async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
 
     returned_data = {"issue_id": issue_id}
 
-    request.app.kafka_producer.send(topics.TASK_DONE, returned_data)
+    topics.send_to_topic(
+        request.app.kafka_producer,
+        topics.ISSUE_DONE,
+        topics.IssueAssignedSchema(
+            **returned_data, assignee_id=request.auth_payload.user_id
+        ),
+    )
 
     return JSONResponse(content=returned_data, status_code=fa.status.HTTP_200_OK)
 
@@ -173,7 +170,7 @@ async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
 )
 @auth_required
 async def issues_shuffle(request: fa.Request) -> JSONResponse:
-    if request.payload.role != UserRole.admin:
+    if request.auth_payload.role != UserRole.admin:
         return JSONResponse(
             content=to_json(ErrorContent(message="Only admins can shuffle")),
             status_code=fa.status.HTTP_403_FORBIDDEN,

@@ -13,6 +13,7 @@ class Issue(BaseModel):
     uuid: str = Field(default_factory=uuid4, alias="_id")
 
     description: str = ""
+    jira_id: str = ""
     status: IssueStatus
 
     assignee_id: str

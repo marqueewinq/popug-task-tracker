@@ -16,7 +16,6 @@ services:
   auth:
     image: popug_auth
     build: ./auth
-    restart: always
     environment:
       DB_DATABASE: "auth"
       VERSION: "${AUTH_VERSION:-auth-0.0.1}"
@@ -47,8 +46,10 @@ services:
     ports:
       - "27099:27017"
     networks:
+      # in practice, i would've split this DB in 3x independent ones
       - auth
-      - tasktracker # in practice, i would've split this DB in two independent ones
+      - tasktracker
+      - billing
 
   tasktracker:
     image: popug_tasktracker
@@ -83,6 +84,7 @@ services:
       << : *shared-envvar-kafka
     command: ["python", "-m", "tasktracker.consumer.app"]
     depends_on:
+      - tasktracker
       - kafka
       - zookeeper
     volumes:
@@ -91,6 +93,54 @@ services:
     networks:
       - kafka
       - tasktracker
+
+
+  billing:
+    image: popug_billing
+    build: ./billing
+    environment:
+      DB_DATABASE: "billing"
+      AUTH_URL: "http://auth/"
+      VERSION: "${BILLING_VERSION:-billing-0.0.1}"
+      SYSTEM_ACCOUNT_USER_ID: "sys"
+      << : *shared-envvar-db
+      << : *shared-envvar-kafka
+    ports:
+      - "82:80"
+    volumes:
+      - ./common:/code/common # in practice, i would've `pip install popug-common` in Dockerfile
+      - ./billing/billing:/code/billing
+    depends_on:
+      - auth
+      - tasktracker
+    command: ["uvicorn", "billing.app:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
+    networks:
+      - internal
+      - billing
+      - kafka
+
+  billing-listener:
+    image: popug_billing
+    build: ./billing
+    restart: always
+    environment:
+      DB_DATABASE: "billing"
+      AUTH_URL: "http://auth/"
+      VERSION: "${BILLING_VERSION:-billing-0.0.1}"
+      SYSTEM_ACCOUNT_USER_ID: "sys"
+      << : *shared-envvar-db
+      << : *shared-envvar-kafka
+    command: ["python", "-m", "billing.consumer"]
+    volumes:
+      - ./common:/code/common # in practice, i would've `pip install popug-common` in Dockerfile
+      - ./billing/billing:/code/billing
+    depends_on:
+      - billing
+      - kafka
+      - zookeeper
+    networks:
+      - billing
+      - kafka
 
   zookeeper:
     image: confluentinc/cp-zookeeper:6.2.0
@@ -153,6 +203,8 @@ networks:
   internal:
     driver: bridge
   tasktracker:
+    driver: bridge
+  billing:
     driver: bridge
   kafka:
     driver: bridge
