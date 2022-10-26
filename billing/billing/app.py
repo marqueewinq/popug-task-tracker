@@ -1,4 +1,3 @@
-import datetime as dt
 import os
 import typing as ty
 
@@ -12,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from billing.models import Account, Transaction
 from billing.serializers import LastDayMetrics
+from billing.utils import create_payroll, create_lastday_metrics
 
 DB_HOST = os.environ["DB_HOST"]
 DB_PORT = os.environ["DB_PORT"]
@@ -167,29 +167,30 @@ async def lastday(
             status_code=fa.status.HTTP_403_FORBIDDEN,
         )
 
-    date = dt.datetime.combine(dt.date.today(), dt.datetime.min.time())
-    total_amount_gained: float = 0.0
-    for transaction_document in request.app.db[Transaction.__name__].find(
-        {
-            "created_at": {"$gte": date.isoformat()},
-            "$or": [
-                {"account_from": app.system_account_id},
-                {"account_to": app.system_account_id},
-            ],
-        }
-    ):
-        transaction = Transaction(**transaction_document)
-        if transaction.account_from == app.system_account_id:
-            total_amount_gained -= transaction.amount
-        elif transaction.account_to == app.system_account_id:
-            total_amount_gained += transaction.amount
-
     return JSONResponse(
-        content=to_json(
-            LastDayMetrics(date=date, total_amount_gained=total_amount_gained)
-        ),
+        content=to_json(create_lastday_metrics(request)),
         status_code=fa.status.HTTP_200_OK,
     )
+
+
+@account_router.post(
+    "/payroll",
+    summary="Pay each popug what he's owed",
+    status_code=fa.status.HTTP_200_OK,
+    responses={403: {"model": ErrorContent, "description": "Admin role is required"}},
+)
+async def payroll(
+    request: fa.Request, auth_payload: AuthPayload = fa.Depends(verify_request)
+) -> JSONResponse:
+    if auth_payload.role == UserRole.regular:
+        return JSONResponse(
+            content=to_json(ErrorContent(message="Admin role is required")),
+            status_code=fa.status.HTTP_403_FORBIDDEN,
+        )
+
+    create_payroll(request)
+
+    return JSONResponse(content={}, status_code=fa.status.HTTP_200_OK)
 
 
 app.include_router(account_router, tags=["Accounts"], prefix="/accounts")

@@ -40,7 +40,7 @@ class Transaction(BaseModel):
 class ExternalInvoice(BaseModel):
     uuid: str = Field(default_factory=uuid4, alias="_id")
 
-    account: str
+    user_id: str
 
     created_at: dt.datetime
 

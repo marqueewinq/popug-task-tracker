@@ -73,8 +73,15 @@ async def issues_list(
     request: fa.Request, auth_payload: AuthPayload = fa.Depends(verify_request)
 ) -> JSONResponse:
     return JSONResponse(
-        content=list(
-            request.app.db[Issue.__name__].find({"assignee_id": auth_payload.user_id})
+        content=to_json(
+            list(
+                map(
+                    lambda x: Issue(**x),
+                    request.app.db[Issue.__name__].find(
+                        {"assignee_id": auth_payload.user_id}
+                    ),
+                )
+            )
         ),
         status_code=fa.status.HTTP_200_OK,
     )
@@ -127,9 +134,9 @@ async def issues_create(
     return JSONResponse(content=to_json(issue), status_code=fa.status.HTTP_201_CREATED)
 
 
-@issue_router.put(
+@issue_router.post(
     "/issues/{issue_id}/done",
-    summary="Put Issue to Done",
+    summary="Mark Issue as Done",
     response_description="Updated status to 'done'",
     status_code=fa.status.HTTP_200_OK,
     response_model=Issue,  # TODO: update docs

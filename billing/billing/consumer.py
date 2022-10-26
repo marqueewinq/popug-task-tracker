@@ -49,7 +49,7 @@ def replicate_issue_created(data: topics.IssueAssignedSchema) -> None:
         return
 
     cost_for_assign = random.random() * 10 + 10
-    cost_for_done = random.random() * 20 + 20
+    cost_for_done = random.random() * 200 + 20
 
     issue = Issue(
         **data.dict(), cost_for_assign=cost_for_assign, cost_for_done=cost_for_done
