@@ -1,5 +1,17 @@
 # popug-task-tracker
-A training project for Async Architecture course 2022
+
+A training project for Async Architecture course 2022.
+
+In this project, i was aiming to do two things simultaneously:
+
+ - Build a sufficiently complex app strictly according to [12 factors](https://12factor.net)
+ - Use asynchronous architecture
+
+## Project Description
+
+Build a task tracker for parrots (a.k.a. `popug`) with a billing system.
+
+
 
 ## HW 1
 
@@ -9,7 +21,7 @@ A training project for Async Architecture course 2022
 
 #### Task tracker
 
-> Таск-трекер должен быть отдельным дашбордом и доступен всем сотрудникам компании UberPopug Inc. 
+> Таск-трекер должен быть отдельным дашбордом и доступен всем сотрудникам компании UberPopug Inc.
 > Каждый сотрудник должен иметь возможность видеть в отдельном месте список заассайненных на него задач
 
 Actor: User
@@ -20,7 +32,7 @@ Event: -
 > Авторизация в таск-трекере должна выполняться через общий сервис авторизации UberPopug Inc (у нас там инновационная система авторизации на основе формы клюва).
 
 Actor: User
-Command: Log in a User 
+Command: Log in a User
 Data: `beak_geometry`
 Event: -
 
@@ -143,7 +155,7 @@ Invoice: invoice_id, account_from, amount, created_at
 
  - авторизация + `*`: синхронная, потому что это авторизация
  - тудушка + деньги: можно сделать асинхронно
- - аналитика + тудушка: асинхронно 
+ - аналитика + тудушка: асинхронно
 
 <img src="./img/1.png" />
 

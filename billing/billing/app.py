@@ -3,14 +3,15 @@ import os
 import typing as ty
 
 import fastapi as fa
-from common.auth import auth_required
+from common.auth import verify_request, AuthPayload
 from common.connectors import create_db_client, create_kafka_producer
 from common.proto.auth import UserRole
 from common.proto.common import ErrorContent, VersionContent
 from fastapi.encoders import jsonable_encoder as to_json
 from fastapi.responses import JSONResponse
 
-from billing.models import Account, LastDayMetrics, Transaction
+from billing.models import Account, Transaction
+from billing.serializers import LastDayMetrics
 
 DB_HOST = os.environ["DB_HOST"]
 DB_PORT = os.environ["DB_PORT"]
@@ -75,15 +76,16 @@ account_router = fa.APIRouter()
 @account_router.get(
     "/accounts",
     summary="List available accounts",
-    response_model=Account,
+    response_model=ty.List[Account],
     status_code=fa.status.HTTP_200_OK,
 )
-@auth_required
-async def list_accounts(request: fa.Request) -> JSONResponse:
+async def list_accounts(
+    request: fa.Request, auth_payload: AuthPayload = fa.Depends(verify_request)
+) -> JSONResponse:
     query: dict
-    if request.auth_payload.role == UserRole.regular:
-        query = {"user_id": request.auth_payload.user_id}
-    elif request.auth_payload.role == UserRole.admin:
+    if auth_payload.role == UserRole.regular:
+        query = {"user_id": auth_payload.user_id}
+    elif auth_payload.role == UserRole.admin:
         query = {}
 
     return JSONResponse(
@@ -101,7 +103,7 @@ async def list_accounts(request: fa.Request) -> JSONResponse:
     "/accounts/{user_id}/transactions",
     summary="List transactions for an account",
     status_code=fa.status.HTTP_200_OK,
-    response_model=Transaction,
+    response_model=ty.List[Transaction],
     responses={
         404: {
             "model": ErrorContent,
@@ -109,12 +111,14 @@ async def list_accounts(request: fa.Request) -> JSONResponse:
         }
     },
 )
-@auth_required
-async def list_transactions(request: fa.Request, user_id: str) -> JSONResponse:
+async def list_transactions(
+    request: fa.Request,
+    user_id: str,
+    auth_payload: AuthPayload = fa.Depends(verify_request),
+) -> JSONResponse:
     account_document: ty.Optional[dict] = None
-    if request.auth_payload.role == UserRole.admin or (
-        request.auth_payload.role == UserRole.regular
-        and request.auth_payload.user_id == user_id
+    if auth_payload.role == UserRole.admin or (
+        auth_payload.role == UserRole.regular and auth_payload.user_id == user_id
     ):
         account_document = request.app.db[Account.__name__].find_one(
             {"user_id": user_id}
@@ -154,9 +158,10 @@ async def list_transactions(request: fa.Request, user_id: str) -> JSONResponse:
     response_model=LastDayMetrics,
     responses={403: {"model": ErrorContent, "description": "Admin role is required"}},
 )
-@auth_required
-async def lastday(request: fa.Request) -> JSONResponse:
-    if request.auth_payload.role == UserRole.regular:
+async def lastday(
+    request: fa.Request, auth_payload: AuthPayload = fa.Depends(verify_request)
+) -> JSONResponse:
+    if auth_payload.role == UserRole.regular:
         return JSONResponse(
             content=to_json(ErrorContent(message="Admin role is required")),
             status_code=fa.status.HTTP_403_FORBIDDEN,

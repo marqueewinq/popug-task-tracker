@@ -75,7 +75,7 @@ curl localhost:82/accounts/accounts/456/transactions -H "Authorization: ${TOKENR
 curl localhost:82/accounts/lastday -H "Authorization: ${TOKEN}" | jq
 curl localhost:82/accounts/lastday -H "Authorization: ${TOKENREG}" | jq
 
-curl localhost:82/accounts/accounts -H "Authorization: ${TOKEN}" | jq
 curl localhost:82/accounts/accounts/sys/transactions -H "Authorization: ${TOKEN}" | jq
+curl localhost:82/accounts/accounts -H "Authorization: ${TOKEN}" | jq
 
 curl localhost:82/ | jq
