@@ -3,7 +3,7 @@ import typing as ty
 
 import fastapi as fa
 from common import topics
-from common.auth import auth_required
+from common.auth import verify_request, AuthPayload
 from common.connectors import create_db_client, create_kafka_producer
 from common.proto.auth import UserRole
 from common.proto.common import ErrorContent, VersionContent
@@ -67,14 +67,20 @@ issue_router = fa.APIRouter()
     "/issues",
     summary="List My Issues",
     status_code=fa.status.HTTP_200_OK,
-    response_model=Issue,
+    response_model=ty.List[Issue],
 )
-@auth_required
-async def issues_list(request: fa.Request) -> JSONResponse:
+async def issues_list(
+    request: fa.Request, auth_payload: AuthPayload = fa.Depends(verify_request)
+) -> JSONResponse:
     return JSONResponse(
-        content=list(
-            request.app.db[Issue.__name__].find(
-                {"assignee_id": request.auth_payload.user_id}
+        content=to_json(
+            list(
+                map(
+                    lambda x: Issue(**x),
+                    request.app.db[Issue.__name__].find(
+                        {"assignee_id": auth_payload.user_id}
+                    ),
+                )
             )
         ),
         status_code=fa.status.HTTP_200_OK,
@@ -94,8 +100,11 @@ async def issues_list(request: fa.Request) -> JSONResponse:
         }
     },
 )
-@auth_required
-async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
+async def issues_create(
+    request: fa.Request,
+    issue: Issue,
+    auth_payload: AuthPayload = fa.Depends(verify_request),
+) -> JSONResponse:
     user = request.app.db[User.__name__].find_one({"user_id": issue.assignee_id})
     if user is None:
         return JSONResponse(
@@ -113,7 +122,7 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
     issue.jira_id = jira_id
 
     inserted_issue = request.app.db[Issue.__name__].insert_one(to_json(issue))
-    returned_data = {"issue_id": inserted_issue.inserted_id}
+    issue.uuid = inserted_issue.inserted_id
 
     topics.send_to_topic(
         request.app.kafka_producer,
@@ -122,21 +131,24 @@ async def issues_create(request: fa.Request, issue: Issue) -> JSONResponse:
             issue_id=inserted_issue.inserted_id, assignee_id=issue.assignee_id
         ),
     )
-    return JSONResponse(content=returned_data, status_code=fa.status.HTTP_201_CREATED)
+    return JSONResponse(content=to_json(issue), status_code=fa.status.HTTP_201_CREATED)
 
 
-@issue_router.put(
+@issue_router.post(
     "/issues/{issue_id}/done",
-    summary="Put Issue to Done",
+    summary="Mark Issue as Done",
     response_description="Updated status to 'done'",
     status_code=fa.status.HTTP_200_OK,
-    response_model=Issue,
+    response_model=Issue,  # TODO: update docs
     responses={404: {"model": ErrorContent, "description": "Issue not found"}},
 )
-@auth_required
-async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
+async def issues_mark_done(
+    request: fa.Request,
+    issue_id: str,
+    auth_payload: AuthPayload = fa.Depends(verify_request),
+) -> JSONResponse:
     update_report = request.app.db[Issue.__name__].update_one(
-        {"_id": issue_id, "assignee_id": request.auth_payload.user_id},
+        {"_id": issue_id, "assignee_id": auth_payload.user_id},
         {"$set": {"status": IssueStatus.done.value}},
     )
     if update_report.matched_count == 0:
@@ -150,9 +162,7 @@ async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
     topics.send_to_topic(
         request.app.kafka_producer,
         topics.ISSUE_DONE,
-        topics.IssueAssignedSchema(
-            **returned_data, assignee_id=request.auth_payload.user_id
-        ),
+        topics.IssueAssignedSchema(**returned_data, assignee_id=auth_payload.user_id),
     )
 
     return JSONResponse(content=returned_data, status_code=fa.status.HTTP_200_OK)
@@ -168,9 +178,10 @@ async def issues_mark_done(request: fa.Request, issue_id: str) -> JSONResponse:
         409: {"model": ErrorContent, "description": "No users were found in a service"},
     },
 )
-@auth_required
-async def issues_shuffle(request: fa.Request) -> JSONResponse:
-    if request.auth_payload.role != UserRole.admin:
+async def issues_shuffle(
+    request: fa.Request, auth_payload: AuthPayload = fa.Depends(verify_request)
+) -> JSONResponse:
+    if auth_payload.role != UserRole.admin:
         return JSONResponse(
             content=to_json(ErrorContent(message="Only admins can shuffle")),
             status_code=fa.status.HTTP_403_FORBIDDEN,

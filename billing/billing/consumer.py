@@ -49,7 +49,7 @@ def replicate_issue_created(data: topics.IssueAssignedSchema) -> None:
         return
 
     cost_for_assign = random.random() * 10 + 10
-    cost_for_done = random.random() * 20 + 20
+    cost_for_done = random.random() * 200 + 20
 
     issue = Issue(
         **data.dict(), cost_for_assign=cost_for_assign, cost_for_done=cost_for_done
@@ -88,7 +88,11 @@ def replicate_issue_reassign(data: topics.IssueReassignedSchema) -> None:
     logging.info(f"\t >> replicate_issue_reassign({data}")
     db = MongoClient(mongo_url)[DB_NAME]
 
-    issue = Issue(**db[Issue.__name__].find_one({"issue_id": data.issue_id}))
+    issue_doc = db[Issue.__name__].find_one({"issue_id": data.issue_id})
+    if issue_doc is None:
+        logging.warning(f"Issue {data.issue_id} not found, skipping")
+        return
+    issue = Issue(**issue_doc)
 
     account = Account(**db[Account.__name__].find_one({"user_id": data.assigned_to}))
     system_account = Account(
@@ -122,7 +126,11 @@ def replicate_issue_done(data: topics.IssueAssignedSchema) -> None:
     logging.info(f"\t >> replicate_issue_done({data}")
     db = MongoClient(mongo_url)[DB_NAME]
 
-    issue = Issue(**db[Issue.__name__].find_one({"issue_id": data.issue_id}))
+    issue_doc = db[Issue.__name__].find_one({"issue_id": data.issue_id})
+    if issue_doc is None:
+        logging.warning(f"Issue {data.issue_id} not found, skipping")
+        return
+    issue = Issue(**issue_doc)
     if issue.marked_as_done:
         logging.info(f"Issue {issue.uuid} already marked_as_done, skipping")
         return
